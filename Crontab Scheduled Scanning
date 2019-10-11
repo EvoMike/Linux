@@ -1,0 +1,62 @@
+Cronjob scripts to automate a network ping/port scan baseline:
+
+**************************************************************************
+PortScan.sh
+**************************************************************************
+#!/bin/bash
+
+# This script will take in a list of known hosts and scan each of them for open ports. This output
+# will be used to compare against a daily baseline to ensure no unauthorized ports or services are
+# being started. Each time a new host is found or a known host is taken offline this will be
+# automatically reflected in the hostIP file, but will not notify the user at this time without
+# manually running a diff on the last port scan and the port scan previous to that one. If you don't
+# use a variable for the file name it will create a new file for every host scanned. No bueno.
+
+filePath=/root/portScans/"portScan"$(date +%F)"-"$(date +%T)
+
+for IP in $(cat /root/hostIPs.txt)
+do {
+	nmap -Pn -A -T4 $IP
+} >> $filePath
+done
+
+**************************************************************************
+PingScan.sh
+**************************************************************************
+#!/bin/bash
+
+# This nmap scan will do a very fast ping scan to find hosts on the network while omitting the
+# hosts that are seen as "Down". I used the file path variable instead of just redirecting the 
+# output because I am going to create the file (a base copy of the scan) and then I am going to
+# use that file to create the hostIPs.txt file, which will allow me to set the cron job to
+# dynamically update the list of hosts that the port scan is run against.
+
+filePath=/root/pingScans/"pingScan"$(date +%F)"-"$(date +%T)
+
+# I used this nmap scan in an attempt to do the scan as quickly as possible since we are just
+# trying to get the hosts that are up, which should limit the amount of time and resources
+# that are used since I plan on having this run every hour.
+
+nmap -sn -T5 --min-parallelism 100 10.0.1-3.0/24 | grep -v Down > $filePath
+
+# This second command is just a simple grep through the file that was just created, but it filters
+# out all data except the ip addresses and updates it to be the new hostIPs.txt file.
+
+grep "scan report" $filePath | awk '{print $5}' > /root/hostIPs.txt
+
+****************************************************************************
+The crontab
+****************************************************************************
+# After creating these two files the only thing left is to tell the system to automatically run these
+# scripts at designated intervals. I want the pingScan to run every hour and I want the portScan to
+# run once in the morning before we come in for work. I am setting the ping scan minute field to 00
+# and the port scan minute field to 05 to give the ping scan enough time to finish and re-write the
+# hostIPs.txt file if need be. All I did to do all this was enter the command 'crontab -e' and I
+# appended the following two lines to the root users crontab:
+
+00 * * * * /root/PingScan.sh
+05 5 * * * /root/PortScan.sh
+
+# I was originally having some issues getting one of these to run due to syntax so I added the
+# following line in order to troubleshoot where my issue was:
+# * * * * * /bin/echo "cron works" >> /root/echoFile
